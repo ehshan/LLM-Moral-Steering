@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+*.log
+
+# Colab
+.ipynb_checkpoints/
+
+# Data & Results (Assume we don't want to track these in Git)
+# This prevents Git from tracking them, but Google Drive *will* still sync them.
+data/processed/
+data/evaluation_results/
+
+# OS
+.DS_Store
+Thumbs.db
