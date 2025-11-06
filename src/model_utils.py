@@ -33,8 +33,7 @@ def load_model_and_tokenizer(model_id):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
-        device_map="auto", # Automatically uses the GPU
-        trust_remote_code=True,
+        device_map="auto",
         trust_remote_code=True
     )
     
