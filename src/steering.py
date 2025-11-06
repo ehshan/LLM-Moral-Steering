@@ -16,32 +16,48 @@ class ActivationHook:
     This works by "catching" the output of a module during the forward pass.
     """
     def __init__(self):
-        # This will store the activation tensor
         self.activation = None
-        # This stores the hook "handle" so we can remove it
         self.handle = None
 
     def hook_fn(self, module, input_tensors, output_tensors):
         """
         This is the function that gets called by PyTorch during the forward pass.
-        We are interested in the *output* of the layer.
         """
-        # output_tensors[0] is the main hidden state.
-        # We grab the activations for the *last token* in the sequence.
-        # Shape: [batch_size, seq_len, hidden_dim] -> we want [batch_size, -1, hidden_dim]
-        # Since we process one prompt at a time (batch_size=1), we take [0, -1, :]
-        self.activation = output_tensors[0][0, -1, :].detach().cpu()
+        # The output of these layers is a TUPLE.
+        # The first element, output_tensors[0], is the hidden state.
+        hidden_state = output_tensors[0]
+        
+        # --- ISSUE LOG - TOO MANY INDICES---
+        # check the dimension of the hidden_state tensor.
+        
+        if hidden_state.dim() == 3:
+            # EXPECTED CASE: [batch_size, seq_len, hidden_dim]
+            # Get the activation of the last token in the sequence.
+            self.activation = hidden_state[0, -1, :].detach().cpu()
+            
+        elif hidden_state.dim() == 2:
+            # UNEXPECTED CASE: The error implies this is happening.
+            # Assume [seq_len, hidden_dim]. Get the last token.
+            print(f"WARNING: Layer output was 2D (shape {hidden_state.shape}), not 3D. Taking last token.")
+            self.activation = hidden_state[-1, :].detach().cpu()
+            
+        else:
+            # UNKNOWN CASE
+            print(f"ERROR: Unexpected activation shape: {hidden_state.shape}")
+            self.activation = None
 
     def register(self, model, layer_index):
         """
         Registers this hook on a specific layer of the model.
         """
-        # Find the specific layer (this path works for Llama, Mistral, Gemma)
-        target_layer = model.model.layers[layer_index]
-        
-        # Register the hook
-        self.handle = target_layer.register_forward_hook(self.hook_fn)
-        print(f"[+] Hook registered on layer {layer_index}.")
+        try:
+            target_layer = model.model.layers[layer_index]
+            self.handle = target_layer.register_forward_hook(self.hook_fn)
+            print(f"[+] Hook registered on layer {layer_index}.")
+        except Exception as e:
+            print(f"ERROR: Failed to register hook on layer {layer_index}. Error: {e}")
+            print("Check if the model architecture (model.model.layers) is correct.")
+
 
     def remove(self):
         """
