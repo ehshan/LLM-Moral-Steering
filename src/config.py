@@ -22,7 +22,7 @@ D_VS_NON_D_PATH = CONTRASTIVE_DATA_DIR / "deontological_vs_non_deontological.csv
 U_VS_D_CONFLICT_PATH = CONTRASTIVE_DATA_DIR / "utilitarian_vs_deontological_conflict.csv"
 
 # --- Generated Steering Prompt Filename ---
-STEERING_PROMPT_PATH = STEERING_PROMPT_DIR / "aug_steer_prompts_UvD.json"
+STEERING_PROMPT_PATH = STEERING_PROMPT_DIR / "steer_prompts_UvD.json"
 
 # --- Parameters ---
 SAMPLE_SIZE = 500
@@ -30,7 +30,7 @@ NUM_PROMPT_PAIRS_TO_GENERATE = 500 # For prompt_generation script
 
 # --- Model Lists ---
 MODEL_LIST = [
-    "meta-llama/Meta-Llama-3-8B-Instruct",
+    "meta-llama/Llama-3.1-8B-Instruct",
     "mistralai/Mistral-7B-Instruct-v0.3",
     "google/gemma-7b-it"
 ]
