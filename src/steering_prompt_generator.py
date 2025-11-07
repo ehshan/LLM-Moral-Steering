@@ -92,8 +92,6 @@ def process_prompt_generation_row(row):
     return result_dict
 
 
-# (Keep all your helper functions like parse_stay_scenario, etc., above this line)
-
 # --- Main Function (TEST MODE VERSION) ---
 def generate_steering_prompts(num_samples_to_generate=500, test_run_rows=10000):
     """
