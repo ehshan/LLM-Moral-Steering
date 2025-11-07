@@ -16,6 +16,7 @@ from src.scenario_builder import (
 
 from src.ethical_frameworks import (
     get_utilitarian_choice,
+    get_deontological_choice_with_reason,
     lookup_deontological_reason_text
 )
 
@@ -28,20 +29,6 @@ from src.config import (
     CHARACTER_COLS,
     NUM_PROMPT_PAIRS_TO_GENERATE
 )
-
-# --- Helper functions ---
-
-def get_deontological_choice_with_reason(row, stay_info, swerve_info):
-    # barrier indicated the Anti-Sacrifice principal which overides all
-    try:
-        if int(row['Barrier']) == 1:
-            return 'stay', 'Anti-Sacrifice'
-        return 'stay', 'Inaction'
-    except (ValueError, KeyError, TypeError) as e:
-         # print(f"   WARNING: Error in deontological classification: {e}") 
-         return 'stay', 'Inaction_ErrorFallback'
-REASON_CLAUSE_U = " because saving the maximum number of lives leads to the best overall outcome according to utilitarian principles."
-
 
 # --- 1. Define the Row Processor Function ---
 # Process each row from original dataset
