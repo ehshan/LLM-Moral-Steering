@@ -92,11 +92,18 @@ def unzip_steering_prompts():
         print(f"ERROR: Could not read JSON file. Error: {e}")
         return None, None
 
-def extract_activations(model, tokenizer, prompt_list, target_layer_index):
+def extract_activations(model, tokenizer, prompt_list, target_layer_index, limit=None):
     """
     Runs inference on all prompts in a list and collects the activations
     from the target layer using a hook.
     """
+
+    # If a limit is provided, slice the prompt_list for a quick test run
+    if limit is not None:
+        print(f"TEST MODE: Processing only {limit} prompts.")
+        prompt_list = prompt_list[:limit]
+
+
     activations_list = []
     hook = ActivationHook()
     hook.register(model, target_layer_index)
@@ -145,11 +152,14 @@ def calculate_steering_vector(positive_activations, negative_activations):
 
 # --- 3. Main Wrapper Function ---
 
-def generate_moral_vector(model_id, target_layer_index, output_filename):
+def generate_moral_vector(model_id, target_layer_index, output_filename, test_run_limit=None):
     """
     Main function to generate and save the moral steering vector.
     """
     print("--- Starting Moral Vector Generation ---")
+    if test_run_limit:
+            print(f"TESTING MODE: Limiting to {test_run_limit} prompts per set.")    
+    
     
     # 1. Load Prompts
     positive_prompts, negative_prompts = unzip_steering_prompts()
@@ -162,13 +172,15 @@ def generate_moral_vector(model_id, target_layer_index, output_filename):
 
     # 3. Extract Activations (Positive)
     positive_activations = extract_activations(
-        model, tokenizer, positive_prompts, target_layer_index
+            model, tokenizer, positive_prompts, target_layer_index,
+            limit=test_run_limit # <-- LIMIT NO ACTIVATIONS 
     )
     if positive_activations is None: return
 
     # 4. Extract Activations (Negative)
     negative_activations = extract_activations(
-        model, tokenizer, negative_prompts, target_layer_index
+            model, tokenizer, negative_prompts, target_layer_index,
+            limit=test_run_limit # <-- LIMIT NO ACTIVATIONS 
     )
     if negative_activations is None: return
 
