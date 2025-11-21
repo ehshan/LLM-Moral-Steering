@@ -4,76 +4,81 @@ import os
 import time
 from tqdm.auto import tqdm # For output progress bar
 
-# Import from our own project files
+# Import from project files
 from src.config import STEERING_PROMPT_PATH, STEERING_PROMPT_DIR, MODEL_LIST
 from src.model_utils import load_model_and_tokenizer
 
-# --- 1. Activation Hook Class ---
+# --- 1. Multi-Layer Activation Hook ---
 
-class ActivationHook:
+class MultiLayerActivationHook:
     """
-    A simple hook class to store the activations of a specific layer.
-    This works by "catching" the output of a module during the forward pass.
+    A smart hook that can capture activations from multiple layers at once.
     """
     def __init__(self):
-        self.activation = None
-        self.handle = None
+        # Stores the activations for the *current* forward pass
+        # Format: {layer_index: tensor}
+        self.layer_activations = {} 
+        self.handles = []
 
-    def hook_fn(self, module, input_tensors, output_tensors):
+    def get_hook_fn(self, layer_idx):
         """
-        This is the function that gets called by PyTorch during the forward pass.
+        Creates a specific hook function for a specific layer index.
+        This closure ensures the hook knows which layer it is attached to.
         """
-        # The output of these layers is a TUPLE.
-        # The first element, output_tensors[0], is the hidden state.
-        hidden_state = output_tensors[0]
-        
-        # --- ISSUE LOG - TOO MANY INDICES---
-        # check the dimension of the hidden_state tensor.
-        
-        if hidden_state.dim() == 3:
-            # EXPECTED CASE: [batch_size, seq_len, hidden_dim]
-            # Get the activation of the last token in the sequence.
-            self.activation = hidden_state[0, -1, :].detach().cpu()
+        def hook_fn(module, input_tensors, output_tensors):
+            # The output is a tuple (hidden_state, ...)
+            hidden_state = output_tensors[0]
             
-        elif hidden_state.dim() == 2:
-            # UNEXPECTED CASE: The error implies this is happening.
-            # Assume [seq_len, hidden_dim]. Get the last token.
-            print(f"WARNING: Layer output was 2D (shape {hidden_state.shape}), not 3D. Taking last token.")
-            self.activation = hidden_state[-1, :].detach().cpu()
+            # --- Safety Check for Tensor Dimensions ---
+            if hidden_state.dim() == 3:
+                # [batch, seq, dim] -> Take last token
+                activation = hidden_state[0, -1, :].detach().cpu()
+            elif hidden_state.dim() == 2:
+                # [seq, dim] -> Take last token
+                activation = hidden_state[-1, :].detach().cpu()
+            else:
+                print(f"ERROR: Unexpected shape at layer {layer_idx}: {hidden_state.shape}")
+                activation = None
+                
+            # Save to our dictionary using the layer index as the key
+            self.layer_activations[layer_idx] = activation
             
-        else:
-            # UNKNOWN CASE
-            print(f"ERROR: Unexpected activation shape: {hidden_state.shape}")
-            self.activation = None
+        return hook_fn
 
-    def register(self, model, layer_index):
+    def register(self, model, target_layers):
         """
-        Registers this hook on a specific layer of the model.
+        Registers hooks on all requested layers.
+        Args:
+            target_layers (list): List of integers (e.g., [16, 17, 18])
         """
-        try:
-            target_layer = model.model.layers[layer_index]
-            self.handle = target_layer.register_forward_hook(self.hook_fn)
-            print(f"[+] Hook registered on layer {layer_index}.")
-        except Exception as e:
-            print(f"ERROR: Failed to register hook on layer {layer_index}. Error: {e}")
-            print("Check if the model architecture (model.model.layers) is correct.")
+        for layer_idx in target_layers:
+            try:
+                # Create the specific hook function for this layer
+                hook_fn = self.get_hook_fn(layer_idx)
+                
+                # Register it
+                target_module = model.model.layers[layer_idx]
+                handle = target_module.register_forward_hook(hook_fn)
+                
+                self.handles.append(handle)
+            except Exception as e:
+                print(f"ERROR: Failed to register hook on layer {layer_idx}. Error: {e}")
 
+        print(f"[+] Registered hooks on {len(target_layers)} layers: {target_layers}")
 
     def remove(self):
-        """
-        Removes the hook from the model.
-        """
-        if self.handle:
-            self.handle.remove()
-            print(f"[+] Hook removed.")
+        """Removes all registered hooks."""
+        for handle in self.handles:
+            handle.remove()
+        self.handles = []
+        self.layer_activations = {}
+        print("[+] All hooks removed.")
 
 
 # --- 2. Core Logic Functions ---
 
 def unzip_steering_prompts():
-    """
-    Loads the JSON file and "unzips" it into two lists.
-    """
+    """Loads JSON and returns two lists of prompts."""
     print(f"Loading steering prompts from: {STEERING_PROMPT_PATH}")
     try:
         with open(STEERING_PROMPT_PATH, 'r', encoding='utf-8') as f:
@@ -82,148 +87,119 @@ def unzip_steering_prompts():
         positive_prompts = [item['DeontologicalPrompt'] for item in prompts_json]
         negative_prompts = [item['UtilitarianPrompt'] for item in prompts_json]
         
-        print(f"Successfully loaded {len(positive_prompts)} positive (Deon) and {len(negative_prompts)} negative (Util) prompts.")
+        print(f"Loaded {len(positive_prompts)} pos / {len(negative_prompts)} neg prompts.")
         return positive_prompts, negative_prompts
-        
-    except FileNotFoundError:
-        print(f"ERROR: Steering prompts file not found at {STEERING_PROMPT_PATH}")
-        return None, None
     except Exception as e:
-        print(f"ERROR: Could not read JSON file. Error: {e}")
+        print(f"ERROR: Could not read prompts. Error: {e}")
         return None, None
 
-def extract_activations(model, tokenizer, prompt_list, target_layer_index, limit=None):
+def extract_activations(model, tokenizer, prompt_list, target_layers, limit=None):
     """
-    Runs inference on all prompts in a list and collects the activations
-    from the target layer using a hook.
+    Runs inference and collects activations for ALL target layers.
+    Returns a dictionary: {layer_idx: concatenated_tensor_of_activations}
     """
-
-    # If a limit is provided, slice the prompt_list for a quick test run
+    # Test Mode Limit
     if limit is not None:
         print(f"TEST MODE: Processing only {limit} prompts.")
         prompt_list = prompt_list[:limit]
 
-
-    activations_list = []
-    hook = ActivationHook()
-    hook.register(model, target_layer_index)
+    # Initialise storage: {16: [], 17: [], ...}
+    activations_storage = {layer: [] for layer in target_layers}
     
-    print(f"Extracting activations from {len(prompt_list)} prompts...")
+    # Register the multi-layer hook
+    hook = MultiLayerActivationHook()
+    hook.register(model, target_layers)
     
-    # Use tqdm for a progress bar
+    print(f"Extracting from {len(prompt_list)} prompts across {len(target_layers)} layers...")
+    
     for prompt in tqdm(prompt_list, desc="Processing prompts"):
-        # Tokenize the prompt
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         
-        # Run a forward pass. We don't need to .generate() text,
-        # we just need the internal activations.
         with torch.no_grad():
             model(**inputs)
         
-        # The hook has now run and self.activation has been set
-        if hook.activation is not None:
-            activations_list.append(hook.activation)
+        # After forward pass, grab data from hook and clear it for next pass
+        for layer in target_layers:
+            act = hook.layer_activations.get(layer)
+            if act is not None:
+                activations_storage[layer].append(act)
         
-    hook.remove() # Clean up the hook
-    
-    if not activations_list:
-        print("ERROR: No activations were collected. Check hook logic.")
-        return None
-        
-    # Stack all activations into a single tensor
-    return torch.stack(activations_list)
+        # Reset hook storage for the next prompt
+        hook.layer_activations = {}
 
-def calculate_steering_vector(positive_activations, negative_activations):
+    hook.remove()
+    
+    # Stack lists into tensors
+    # Result: {16: Tensor[500, 4096], 17: Tensor[500, 4096], ...}
+    final_results = {}
+    for layer, act_list in activations_storage.items():
+        if act_list:
+            final_results[layer] = torch.stack(act_list)
+        else:
+            print(f"WARNING: No data collected for layer {layer}")
+    
+    return final_results
+
+def calculate_steering_vectors(pos_dict, neg_dict, target_layers):
     """
-    Calculates the steering vector by averaging and subtracting.
+    Calculates steering vectors for ALL layers.
+    Returns: {layer_idx: steering_vector_tensor}
     """
-    print("Calculating steering vector...")
+    print("Calculating steering vectors for all layers...")
+    steering_vectors = {}
     
-    # Calculate the mean activation for each set
-    # Shape of activations: [num_prompts, hidden_dim]
-    avg_positive_activations = torch.mean(positive_activations, dim=0)
-    avg_negative_activations = torch.mean(negative_activations, dim=0)
-    
-    # Subtract to get the steering vector
-    steering_vector = avg_positive_activations - avg_negative_activations
-    
-    print(f"Steering vector calculated. Shape: {steering_vector.shape}")
-    return steering_vector
+    for layer in target_layers:
+        pos_acts = pos_dict.get(layer)
+        neg_acts = neg_dict.get(layer)
+        
+        if pos_acts is None or neg_acts is None:
+            print(f"Skipping layer {layer} (missing data).")
+            continue
+            
+        # Mean and Subtract
+        avg_pos = torch.mean(pos_acts, dim=0)
+        avg_neg = torch.mean(neg_acts, dim=0)
+        vector = avg_pos - avg_neg
+        
+        steering_vectors[layer] = vector
+        
+    print(f"Calculated {len(steering_vectors)} vectors.")
+    return steering_vectors
 
 # --- 3. Main Wrapper Function ---
 
-def generate_moral_vector(model_id, target_layer_index, output_filename, test_run_limit=None):
+def generate_moral_vectors(model_id, target_layers, output_filename, test_run_limit=None):
     """
-    Main function to generate and save the moral steering vector.
+    Main wrapper to generate and save a DICTIONARY of vectors.
     """
-    print("--- Starting Moral Vector Generation ---")
-    if test_run_limit:
-            print(f"TESTING MODE: Limiting to {test_run_limit} prompts per set.")    
-    
+    print("--- Starting Multi-Layer Moral Vector Generation ---")
     
     # 1. Load Prompts
-    positive_prompts, negative_prompts = unzip_steering_prompts()
-    if positive_prompts is None:
-        return
+    pos_prompts, neg_prompts = unzip_steering_prompts()
+    if not pos_prompts: return
 
     # 2. Load Model
-    # We import this from our new utility script!
     model, tokenizer = load_model_and_tokenizer(model_id)
 
-    # 3. Extract Activations (Positive)
-    positive_activations = extract_activations(
-            model, tokenizer, positive_prompts, target_layer_index,
-            limit=test_run_limit # <-- LIMIT NO ACTIVATIONS 
-    )
-    if positive_activations is None: return
+    # 3. Extract All Layers (Positive)
+    pos_dict = extract_activations(model, tokenizer, pos_prompts, target_layers, limit=test_run_limit)
+    
+    # 4. Extract All Layers (Negative)
+    neg_dict = extract_activations(model, tokenizer, neg_prompts, target_layers, limit=test_run_limit)
 
-    # 4. Extract Activations (Negative)
-    negative_activations = extract_activations(
-            model, tokenizer, negative_prompts, target_layer_index,
-            limit=test_run_limit # <-- LIMIT NO ACTIVATIONS 
-    )
-    if negative_activations is None: return
+    # 5. Calculate All Vectors
+    vector_dict = calculate_steering_vectors(pos_dict, neg_dict, target_layers)
 
-    # 5. Calculate Vector
-    steering_vector = calculate_steering_vector(
-        positive_activations, negative_activations
-    )
-
-    # 6. Save the Vector
-    # We save it in the same directory as the prompts
+    # 6. Save Dictionary
     output_path = STEERING_PROMPT_DIR / output_filename
     try:
-        torch.save(steering_vector, output_path)
-        print(f"Steering vector saved successfully to: {output_path}")
+        torch.save(vector_dict, output_path)
+        print(f"Saved multi-layer vector dictionary to: {output_path}")
+        print(f"Contains layers: {list(vector_dict.keys())}")
     except Exception as e:
-        print(f"ERROR: Could not save steering vector. Error: {e}")
-        
-    # 7. Clean up memory
-    del model, tokenizer, positive_activations, negative_activations
-    torch.cuda.empty_cache()
-    print("[+] Model unloaded and VRAM cleared.")
-    print("--- Moral Vector Generation Complete ---")
+        print(f"ERROR: Could not save file. Error: {e}")
 
-# --- This allows the script to be run directly ---
-if __name__ == "__main__":
-    
-    # Add project root to path to allow `from src...` imports
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    # --- Configuration for direct run ---
-    # We use the first model from our config list as the default
-    MODEL_TO_USE = MODEL_LIST[0] 
-    # This is a good default layer for an 8B model (which have ~32 layers)
-    TARGET_LAYER = 20 
-    OUTPUT_FILE = "deon_vs_util_vector.pt"
-    
-    print(f"Running script directly (locally)...")
-    print(f"Model: {MODEL_TO_USE}")
-    print(f"Layer: {TARGET_LAYER}")
-    
-    generate_moral_vector(
-        model_id=MODEL_TO_USE,
-        target_layer_index=TARGET_LAYER,
-        output_filename=OUTPUT_FILE
-    )
+    # Cleanup
+    del model, tokenizer, pos_dict, neg_dict
+    torch.cuda.empty_cache()
+    print("--- Generation Complete ---")
