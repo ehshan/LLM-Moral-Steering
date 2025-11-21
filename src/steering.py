@@ -203,3 +203,46 @@ def generate_moral_vectors(model_id, target_layers, output_filename, test_run_li
     del model, tokenizer, pos_dict, neg_dict
     torch.cuda.empty_cache()
     print("--- Generation Complete ---")
+
+# --- ALLOWS SCRIPT TO BE RUN DIRECTLY FROM TERMINAL ---
+if __name__ == "__main__":
+    
+    # Add project root to path to allow `from src...` imports
+    import sys
+    # Get the path to the project root (one level up from 'src')
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    
+    # Now import from config
+    try:
+        from src.config import MODEL_LIST
+        
+        # --- Configuration for CLI Run ---
+        # Default to Llama 3
+        MODEL_TO_USE = MODEL_LIST[0] 
+        
+        # Default to capturing layers 16-30 (inclusive)
+        START_LAYER = 16
+        END_LAYER = 30
+        TARGET_LAYERS = list(range(START_LAYER, END_LAYER + 1))
+        
+        # Generate descriptive filename
+        OUTPUT_FILE = f"{MODEL_TO_USE.split('/')[-1]}_layers_{START_LAYER}-{END_LAYER}_vectors.pt"
+        
+        print(f"\n--- Running Multi-Layer Vector Generation (CLI Mode) ---")
+        print(f"Model: {MODEL_TO_USE}")
+        print(f"Target Layers: {START_LAYER} to {END_LAYER}")
+        print(f"Output Filename: {OUTPUT_FILE}")
+        
+        # Run the generation
+        generate_moral_vectors(
+            model_id=MODEL_TO_USE,
+            target_layers=TARGET_LAYERS,
+            output_filename=OUTPUT_FILE,
+            test_run_limit=None # Set to integer (e.g., 10) for a quick debug run
+        )
+        
+    except ImportError as e:
+        print(f"Import Error: {e}")
+        print("Ensure running script from the project root or check python path is set correctly.")    
