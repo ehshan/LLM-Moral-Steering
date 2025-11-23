@@ -26,13 +26,6 @@ class SteeringHook:
         https://arxiv.org/pdf/2308.10248v4
     """
     def __init__(self, steering_vector, multiplier):
-        """
-        Initialises the hook with the vector and strength coefficient.
-        
-        Args:
-            steering_vector (torch.Tensor): The direction to add (Deon - Util).
-            multiplier (float): The strength of the push (coefficient).
-        """
         self.steering_vector = steering_vector
         self.multiplier = multiplier
         self.handle = None
@@ -40,24 +33,33 @@ class SteeringHook:
     def hook_fn(self, module, input_tensors, output_tensors):
         """
         Intercepts the forward pass and modifies activations in-place.
-        
-        Logic:
-            New_Act = Old_Act + (Multiplier * Vector)
         """
+        # 1. Identify the Hidden State
         # output_tensors is a tuple; the first element is the hidden state.
         # Modify the tuple in place or return a new one.
-        hidden_state = output_tensors[0]
+        # Some models return a tuple (hidden_state, cache, ...), others just the tensor.
+        if isinstance(output_tensors, tuple):
+            hidden_state = output_tensors[0]
+        else:
+            hidden_state = output_tensors
         
+        # 2. Prepare the Vector
         # Ensure vector is on the correct device and data type
         # The vector shape is [hidden_dim], e.g. [4096]
         # The hidden_state shape is [batch, seq_len, hidden_dim]
         vector = self.steering_vector.to(hidden_state.device).to(hidden_state.dtype)
         
-        # Apply Activation Addition
+        # 3. Apply Activation Addition
         # PyTorch handles the shape alignment (adding to every token)
         modified_hidden_state = hidden_state + (vector * self.multiplier)
         
-        return (modified_hidden_state,) + output_tensors[1:]
+        # 4. Return the correct format
+        if isinstance(output_tensors, tuple):
+            # If tuple, we must return a tuple, preserving the other elements
+            return (modified_hidden_state,) + output_tensors[1:]
+        else:
+            # If it was a tensor, we return just the modified tensor
+            return modified_hidden_state
 
     def register(self, model, layer_idx):
         """Registers the hook onto the specific transformer layer."""
@@ -266,6 +268,9 @@ def benchmark_steering_layers(model_id, vector_filename, layers_to_test, sample_
     # Clean up
     del model, tokenizer
     torch.cuda.empty_cache()
+
+    # return ---
+    return results_log
 
 # Allow running from terminal
 if __name__ == "__main__":
