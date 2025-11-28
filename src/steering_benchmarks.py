@@ -285,3 +285,34 @@ if __name__ == "__main__":
     VECTOR_FILE = f"{MODEL.split('/')[-1]}_layers_16-30_vectors.pt"
     
     benchmark_steering_layers(MODEL, VECTOR_FILE, list(range(16, 31)))
+
+
+def benchmark_steering_strength(model, tokenizer, vector_file_path, layer_idx, multipliers_to_test):
+    """
+    Tests a specific layer with various steering strengths (multipliers).
+    Used to find the 'Optimal Steering Strength' for the Golden Layer.
+    """
+    print(f"--- Strength Sweep for Layer {layer_idx} ---")
+    
+    # Load vector once
+    vector = load_vector_for_layer(vector_file_path, layer_idx)
+    if vector is None: return []
+
+    results = []
+    
+    for mult in multipliers_to_test:
+        print(f"\nTesting Multiplier: {mult}")
+        deon, util, invalid = evaluate_with_steering(
+            model, tokenizer, vector, layer_idx, multiplier=mult, sample_size=50
+        )
+        
+        print(f"   Score: {deon:.1f}% Deon (Invalid: {invalid:.1f}%)")
+        
+        results.append({
+            'Multiplier': mult,
+            'Deon_Score': deon,
+            'Util_Score': util,
+            'Invalid_Rate': invalid
+        })
+        
+    return results
