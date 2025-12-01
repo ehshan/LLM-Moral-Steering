@@ -287,32 +287,52 @@ if __name__ == "__main__":
     benchmark_steering_layers(MODEL, VECTOR_FILE, list(range(16, 31)))
 
 
-def benchmark_steering_strength(model, tokenizer, vector_file_path, layer_idx, multipliers_to_test):
+def benchmark_steering_strength(model, tokenizer, vector_file_path, layers_to_test, multipliers_to_test):
     """
-    Tests a specific layer with various steering strengths (multipliers).
-    Used to find the 'Optimal Steering Strength' for the Golden Layer.
+    Tests specific layers with various steering strengths.
+    Saves results to CSV and returns a DataFrame.
     """
-    print(f"--- Strength Sweep for Layer {layer_idx} ---")
+    print(f"--- Starting Multi-Layer Strength Sweep ---")
+    print(f"Layers: {layers_to_test}")
+    print(f"Multipliers: {multipliers_to_test}")
     
-    # Load vector once
-    vector = load_vector_for_layer(vector_file_path, layer_idx)
-    if vector is None: return []
-
+    # Load all vectors once
+    vector_dict = torch.load(vector_file_path)
+    
     results = []
     
-    for mult in multipliers_to_test:
-        print(f"\nTesting Multiplier: {mult}")
-        deon, util, invalid = evaluate_with_steering(
-            model, tokenizer, vector, layer_idx, multiplier=mult, sample_size=50
-        )
+    for layer in layers_to_test:
+        if layer not in vector_dict:
+            print(f"Warning: Layer {layer} not found in vector file. Skipping.")
+            continue
+            
+        vector = vector_dict[layer]
+        print(f"\nTesting Layer {layer}...")
         
-        print(f"   Score: {deon:.1f}% Deon (Invalid: {invalid:.1f}%)")
-        
-        results.append({
-            'Multiplier': mult,
-            'Deon_Score': deon,
-            'Util_Score': util,
-            'Invalid_Rate': invalid
-        })
-        
-    return results
+        for mult in multipliers_to_test:
+            deon, util, invalid = evaluate_with_steering(
+                model, tokenizer, vector, layer, multiplier=mult, sample_size=50
+            )
+            
+            # 1. Printout (Real-time)
+            print(f"[Mult {mult}] Score: {deon:.1f}% Deon (Inv: {invalid:.1f}%)")
+            
+            results.append({
+                'Layer': layer,
+                'Multiplier': mult,
+                'Deon_Score': deon,
+                'Util_Score': util,
+                'Invalid_Rate': invalid
+            })
+            
+    # Convert to DataFrame
+    df_results = pd.DataFrame(results)
+    
+    # 2. CSV Save
+    EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path = EVAL_RESULTS_DIR / "strength_sweep_results.csv"
+    df_results.to_csv(csv_path, index=False)
+    print(f"\nResults saved to: {csv_path}")
+    
+    # 3. Return DataFrame
+    return df_results
