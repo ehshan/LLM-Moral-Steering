@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 def plot_layer_sweep(results_log):
     """
@@ -39,4 +40,38 @@ def plot_layer_sweep(results_log):
     ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
 
     plt.tight_layout()
+    plt.show()
+
+
+def plot_strength_heatmap(df_results):
+    """
+    Plots a heatmap: Layer vs. Multiplier with color representing Deon Score.
+    """
+    # Pivot data for heatmap format
+    heatmap_data = df_results.pivot(index="Layer", columns="Multiplier", values="Deon_Score")
+    
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(heatmap_data, annot=True, fmt=".0f", cmap="Blues", cbar_kws={'label': '% Deontological'})
+    plt.title("Steering Effectiveness Heatmap (Layer vs. Strength)")
+    plt.show()
+
+
+def plot_strength_lines(df_results):
+    """
+    Plots line charts: One line per layer showing response to multiplier.
+    """
+    plt.figure(figsize=(10, 6))
+    
+    # Get unique layers
+    layers = df_results['Layer'].unique()
+    
+    for layer in layers:
+        subset = df_results[df_results['Layer'] == layer]
+        plt.plot(subset['Multiplier'], subset['Deon_Score'], marker='o', label=f'Layer {layer}')
+        
+    plt.xlabel('Steering Multiplier')
+    plt.ylabel('% Deontological Choice')
+    plt.title('Steering Response Curves')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
     plt.show()
