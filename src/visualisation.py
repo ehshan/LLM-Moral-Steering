@@ -1,3 +1,5 @@
+import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -54,12 +56,10 @@ def plot_strength_heatmap(df_results):
     sns.heatmap(heatmap_data, annot=True, fmt=".0f", cmap="Blues", cbar_kws={'label': '% Deontological'})
     plt.title("Steering Effectiveness Heatmap (Layer vs. Strength)")
     plt.show()
+    plt.close()
 
-
-def plot_strength_lines(df_results):
-    """
-    Plots line charts: One line per layer showing response to multiplier.
-    """
+def plot_health_line(df, output_dir, tag):
+    """Plots the Invalid Rate (Refusal Wall)."""
     plt.figure(figsize=(10, 6))
     
     # Get unique layers
@@ -70,8 +70,76 @@ def plot_strength_lines(df_results):
         plt.plot(subset['Multiplier'], subset['Deon_Score'], marker='o', label=f'Layer {layer}')
         
     plt.xlabel('Steering Multiplier')
-    plt.ylabel('% Deontological Choice')
-    plt.title('Steering Response Curves')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.ylim(0, 105)
+    
+    save_path = os.path.join(output_dir, f'Viz_Health_{tag}.png')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
+    plt.close()
+
+def plot_global_heatmap(df, output_dir, tag):
+    """Plots Layer vs Multiplier for the 'Gap' metric."""
+    plt.figure(figsize=(14, 10))
+    
+    pivot = df.pivot(index='Layer', columns='Multiplier', values='Gap')
+    pivot.sort_index(inplace=True)
+    
+    sns.heatmap(pivot, annot=True, fmt=".0f", cmap="coolwarm", center=0,
+                cbar_kws={'label': 'Deontological Advantage (%)'}, annot_kws={"size": 8})
+    
+    plt.title(f'Global Steering Heatmap ({tag})', fontsize=16, weight='bold')
+    plt.tight_layout()
+    
+    save_path = os.path.join(output_dir, f'Viz_Global_Heatmap_{tag}.png')
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
+
+def plot_refusal_wall(df, output_dir, tag):
+    """Plots Layer vs Multiplier for Invalid Rate."""
+    plt.figure(figsize=(14, 10))
+    
+    pivot = df.pivot(index='Layer', columns='Multiplier', values='Invalid_Rate')
+    pivot.sort_index(inplace=True)
+    
+    sns.heatmap(pivot, annot=True, fmt=".0f", cmap="Reds", vmin=0, vmax=100,
+                cbar_kws={'label': 'Invalid Rate (%)'}, annot_kws={"size": 8})
+    
+    plt.title(f'Refusal Wall Analysis ({tag})', fontsize=16, weight='bold')
+    plt.tight_layout()
+    
+    save_path = os.path.join(output_dir, f'Viz_Refusal_Heatmap_{tag}.png')
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
+
+def plot_quartered_analysis(df, output_dir, tag):
+    """Generates the 4x4 Grid breakdown (Only runs if we have enough layers)."""
+    chunks = [
+        (0, 7, "Quadrant 1: Early Layers (0-7)"),
+        (8, 15, "Quadrant 2: Middle Layers (8-15)"),
+        (16, 23, "Quadrant 3: Deep Layers (16-23)"),
+        (24, 31, "Quadrant 4: Final Layers (24-31)")
+    ]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+    axes = axes.flatten()
+
+    for i, (start, end, title) in enumerate(chunks):
+        chunk_df = df[(df['Layer'] >= start) & (df['Layer'] <= end)]
+        
+        # S-Curve Subplot
+        sns.lineplot(data=chunk_df, x='Multiplier', y='Deon_Score', hue='Layer',
+                     palette='tab10', marker='o', ax=axes[i], legend='full')
+        
+        axes[i].set_title(title, fontsize=12, weight='bold')
+        axes[i].set_ylim(-5, 105)
+        axes[i].axhline(50, color='gray', linestyle='--')
+
+    plt.suptitle(f'Quartered S-Curve Analysis ({tag})', fontsize=20, weight='bold')
+    plt.tight_layout()
+    
+    save_path = os.path.join(output_dir, f'Viz_Quartered_{tag}.png')
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
