@@ -62,13 +62,17 @@ def plot_health_line(df, output_dir, tag):
     """Plots the Invalid Rate (Refusal Wall)."""
     plt.figure(figsize=(10, 6))
     
-    # Get unique layers
-    layers = df_results['Layer'].unique()
+    if df['Layer'].nunique() > 1:
+        sns.lineplot(data=df, x='Multiplier', y='Invalid_Rate', hue='Layer', 
+                     palette='Reds', marker='o', alpha=0.7, legend=False)
+    else:
+        sns.lineplot(data=df, x='Multiplier', y='Invalid_Rate', marker='o', linewidth=3, color='red')
+
+    # Add Danger Zone Line (10%)
+    plt.axhline(10, color='black', linestyle='--', label="Unusable (>10%)")
     
-    for layer in layers:
-        subset = df_results[df_results['Layer'] == layer]
-        plt.plot(subset['Multiplier'], subset['Deon_Score'], marker='o', label=f'Layer {layer}')
-        
+    plt.title(f'Model Health / Refusal Wall ({tag})', fontsize=14, weight='bold')
+    plt.ylabel('Invalid Rate (%)')
     plt.xlabel('Steering Multiplier')
     plt.ylim(0, 105)
     
