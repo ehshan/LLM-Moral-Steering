@@ -53,8 +53,24 @@ def plot_strength_heatmap(df_results):
     heatmap_data = df_results.pivot(index="Layer", columns="Multiplier", values="Deon_Score")
     
     plt.figure(figsize=(10, 6))
-    sns.heatmap(heatmap_data, annot=True, fmt=".0f", cmap="Blues", cbar_kws={'label': '% Deontological'})
-    plt.title("Steering Effectiveness Heatmap (Layer vs. Strength)")
+    
+    # If many layers, use hue. If one layer, just line.
+    if df['Layer'].nunique() > 1:
+        sns.lineplot(data=df, x='Multiplier', y='Deon_Score', hue='Layer', 
+                     palette='viridis', marker='o', alpha=0.7, legend=False)
+    else:
+        sns.lineplot(data=df, x='Multiplier', y='Deon_Score', marker='o', linewidth=3, color='blue')
+        
+    # Add Reference Line (50% = Neutral)
+    plt.axhline(50, color='gray', linestyle='--', alpha=0.5, label="Neutral (50%)")
+    
+    plt.title(f'Steering Response S-Curve ({tag})', fontsize=14, weight='bold')
+    plt.ylabel('Deontological Choice (%)')
+    plt.xlabel('Steering Multiplier')
+    plt.grid(True, alpha=0.3)
+    
+    save_path = os.path.join(output_dir, f'Viz_SCurve_{tag}.png')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
 
