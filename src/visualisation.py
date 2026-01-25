@@ -1,57 +1,58 @@
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
+import os
 
-def plot_layer_sweep(results_log):
+# Set global style
+sns.set_theme(style="whitegrid")
+custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+sns.set_theme(style="ticks", rc=custom_params)
+
+def generate_analysis_report(df, output_dir, experiment_tag):
     """
-    Visualizes the steering effect across layers.
-    X-axis: Layer Number
-    Y-axis (Left): % Deontological Choice (Effectiveness)
-    Y-axis (Right): % Invalid Responses (Safety)
-    """
-    layers = [r['Layer'] for r in results_log]
-    pos_scores = [r['Pos_Deon'] for r in results_log]
-    neg_scores = [r['Neg_Deon'] for r in results_log]
-    invalid_scores = [r['Invalid_Avg'] for r in results_log]
-
-    fig, ax1 = plt.subplots(figsize=(12, 6))
-
-    # Plot Effectiveness (The Gap)
-    ax1.set_xlabel('Layer Number', fontsize=12)
-    ax1.set_ylabel('% Deontological Choice', color='tab:blue', fontsize=12)
-    ax1.plot(layers, pos_scores, label='+1.0 (Push Deon)', color='tab:blue', marker='o', linewidth=2)
-    ax1.plot(layers, neg_scores, label='-1.0 (Push Util)', color='tab:cyan', marker='o', linestyle='--', linewidth=2)
-    ax1.tick_params(axis='y', labelcolor='tab:blue')
-    ax1.set_ylim(-5, 105)
-    ax1.grid(True, alpha=0.3)
-
-    # Plot Safety (Invalid Rate) on Secondary Y-axis
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('% Invalid Responses', color='tab:red', fontsize=12)
-    ax2.bar(layers, invalid_scores, color='tab:red', alpha=0.2, label='Invalid %', width=0.6)
-    ax2.tick_params(axis='y', labelcolor='tab:red')
-    ax2.set_ylim(0, 50) # Scale this depending on how bad the invalid rate gets
-
-    # Title and Legend
-    plt.title('Steering Layer Sweep: Effectiveness vs. Safety', fontsize=14, pad=20)
+    The Master Function.
+    Takes raw results, calculates metrics, and routes to the correct visualisation suite.
     
-    # Combine legends
-    lines_1, labels_1 = ax1.get_legend_handles_labels()
-    lines_2, labels_2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_strength_heatmap(df_results):
+    Args:
+        df (pd.DataFrame): The results dataframe (Cols: Layer, Multiplier, Deon_Score, Util_Score, Invalid_Rate)
+        output_dir (Path): Where to save images.
+        experiment_tag (str): Label for the files (e.g., 'ai_judge_layer6').
     """
-    Plots a heatmap: Layer vs. Multiplier with color representing Deon Score.
-    """
-    # Pivot data for heatmap format
-    heatmap_data = df_results.pivot(index="Layer", columns="Multiplier", values="Deon_Score")
+    print(f"Generating Analysis Report for: {experiment_tag}")
     
+    # 1. Pre-Processing: Calculate the "Gap"
+    # Gap > 0 means Deontological preference
+    # Gap < 0 means Utilitarian preference
+    df['Gap'] = df['Deon_Score'] - df['Util_Score']
+    
+    # 2. Determine Mode (Single Layer vs. Full Sweep)
+    unique_layers = df['Layer'].nunique()
+    is_full_sweep = unique_layers >= 30  # Allow for small margin of error (e.g. 0-31)
+    
+    print(f"   -> Detected {unique_layers} unique layers.")
+    
+    # 3. Standard Plots (Run for EVERY experiment)
+    plot_s_curve(df, output_dir, experiment_tag)
+    plot_health_line(df, output_dir, experiment_tag)
+    
+    # 4. Conditional Plots (Run only for Full Sweep)
+    if is_full_sweep:
+        print("   -> Mode: Full Sweep (Generating Heatmaps & Quartered Grids)")
+        plot_global_heatmap(df, output_dir, experiment_tag)
+        plot_refusal_wall(df, output_dir, experiment_tag)
+        plot_quartered_analysis(df, output_dir, experiment_tag)
+    else:
+        print("   -> Mode: Precision Strike (Skipping Heatmaps & Quartered Grids)")
+        # Optional: Add a specific "Single Layer Detail" plot here if needed
+        
+    print(f"Visualisation Complete. Saved to {output_dir}")
+
+
+# --- INDIVIDUAL PLOTTING FUNCTIONS ---
+
+def plot_s_curve(df, output_dir, tag):
+    """Plots the standard S-Curve (Multiplier vs Deon Score)."""
     plt.figure(figsize=(10, 6))
     
     # If many layers, use hue. If one layer, just line.
