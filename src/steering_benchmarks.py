@@ -167,8 +167,23 @@ def evaluate_with_steering(model, tokenizer, steering_vector, layer_idx, multipl
             {"role": "user", "content": user_message},
         ]
         
-        # Prepare inputs
-        input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(model.device)
+        # Prepare inputs - OLD
+        # input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(model.device)
+        
+        # Prepare inputs - NEW
+        # CHANGE: We capture the output to a temp variable first
+        inputs = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt")
+        
+        # CHANGE: Check if it's a Dictionary (BatchEncoding) and extract the tensor if so
+        if hasattr(inputs, "keys"): 
+            input_ids = inputs["input_ids"]
+        else:
+            input_ids = inputs
+            
+        # Move to device
+        input_ids = input_ids.to(model.device)
+        
+        # Generate Response
         
         # Generate Response
         # The SteeringHook automatically modifies activations during this forward pass
@@ -201,6 +216,9 @@ def evaluate_with_steering(model, tokenizer, steering_vector, layer_idx, multipl
     invalid_pct = summary.get('INVALID', 0.0)
     
     return deon_pct, util_pct, invalid_pct
+
+
+
 
 
 # -----------------------------------------------------------------------------
