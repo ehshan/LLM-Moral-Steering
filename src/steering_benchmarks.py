@@ -5,6 +5,26 @@ import csv
 import pandas as pd
 import random
 from tqdm.auto import tqdm
+import json
+
+from concurrent.futures import ThreadPoolExecutor
+
+from openai import OpenAI
+from google.colab import userdata
+
+# Global Client
+try:
+    # Try to get from Colab Secrets first
+    api_key = userdata.get('OPENAI_API_KEY')
+except:
+    # Fallback/Error handling
+    api_key = os.getenv("OPENAI_API_KEY") 
+
+if not api_key:
+    print("WARNING: No OpenAI API Key found. The judge will fail.")
+    client = None
+else:
+    client = OpenAI(api_key=api_key)
 
 # Project imports
 from src.config import (
