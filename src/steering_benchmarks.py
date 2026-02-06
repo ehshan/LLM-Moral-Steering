@@ -477,7 +477,7 @@ if __name__ == "__main__":
     benchmark_steering_layers(MODEL, VECTOR_FILE, list(range(16, 31)))
 
 
-def benchmark_steering_strength(model, tokenizer, vector_file_path, layers_to_test, multipliers_to_test):
+def benchmark_steering_strength(model, tokenizer, vector_file_path, layers_to_test, multipliers_to_test, sample_size=None):
     """
     Tests specific layers with various steering strengths.
     Saves results to CSV and returns a DataFrame.
