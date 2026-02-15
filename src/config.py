@@ -1,8 +1,41 @@
-import pathlib
+import os
+from pathlib import Path
+
+# --- 1. ENVIRONMENT DETECTION ---
+try:
+    from google.colab import userdata
+    IS_COLAB = True
+except ImportError:
+    IS_COLAB = False
+
+# --- 2. API KEY MANAGEMENT ---
+if IS_COLAB:
+    # Pull securely from Colab Secrets
+    OPENAI_API_KEY = userdata.get('OPENAI_API_KEY')
+    HF_TOKEN = userdata.get('HF_TOKEN')
+    
+    # Explicitly set environment variables so libraries (like transformers) can find them
+    if OPENAI_API_KEY:
+        os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
+    if HF_TOKEN:
+        os.environ['HF_TOKEN'] = HF_TOKEN
+else:
+    # LOCAL DESKTOP: Load securely from home directory
+    try:
+        from dotenv import load_dotenv
+        # Resolves to C:\Users\username\.env (Windows) or ~/.env (Linux/Mac)
+        env_path = Path.home() / '.env'
+        load_dotenv(dotenv_path=env_path)
+    except ImportError:
+        print("WARNING: python-dotenv not installed. Run `pip install python-dotenv`.")
+    
+    # load_dotenv automatically populates os.environ, so we can just read them
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    HF_TOKEN = os.getenv("HF_TOKEN")
 
 # --- Project Structure ---
 # Dynamically finds the root folder of the project
-ROOT_DIR = pathlib.Path(__file__).parent.parent
+ROOT_DIR = Path(__file__).parent.parent
 
 # --- Data Directories ---
 # Base path for data
