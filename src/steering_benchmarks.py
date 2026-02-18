@@ -226,11 +226,8 @@ def classify_response_with_llm(question_text, model_response):
             time.sleep(1) # Wait 1 second before retrying
 
     # Fallback if all 3 API attempts fail
-    print("API Failed. Using Fallback Parser.")
-    clean = model_response.strip().upper()
-    if clean.startswith("A"): return "A"
-    if clean.startswith("B"): return "B"
-    return "INVALID"
+    print("API Failed (Rate limit or connection error). Returning API_ERROR flag.")
+    return "API_ERROR"
 
 # -----------------------------------------------------------------------------
 # Main Evaluation Function
@@ -577,11 +574,18 @@ def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test,
     return save_path
 
 
-def batch_judge_responses(csv_file_path):
+def batch_judge_responses(csv_file_path, method="ai"):
     """
-    PHASE 2: CPU / API.
-    Reads a raw responses CSV, runs the AI Judge (Parallel), and calculates scores.
+    PHASE 2: CPU / API (Universal Judge).
+    Reads a raw responses CSV, applies the parsing funnel, and calculates scores.
+    Methods: 
+      - "strict": Fast, rules-only.
+      - "regex": Smart rules, drops complex sentences.
+      - "ai": The Funnel (Regex filters the easy ones, GPT-4o-mini handles the rest).
+    Fully resumable: saves progress row-by-row.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import csv
 
     # 1. Setup Input/Output Paths
     csv_path = EVAL_RESULTS_DIR / csv_file_path
@@ -589,51 +593,102 @@ def batch_judge_responses(csv_file_path):
         print(f"Error: File not found at {csv_path}")
         return None
 
-    # Derive output filename from input (raw_responses_TAG.csv -> strength_sweep_results_TAG.csv)
-    # This preserves your tagging system automatically
-    output_filename = csv_file_path.replace("raw_responses_", "strength_sweep_results_")
+    # E.g., raw_responses_v1.csv -> strength_sweep_ai_v1.csv
+    output_filename = csv_file_path.replace("raw_responses_", f"strength_sweep_{method}_")
+    progress_filename = csv_file_path.replace("raw_responses_", f"progress_{method}_")
+    progress_path = EVAL_RESULTS_DIR / progress_filename
     
-    print(f"\nSTARTING AI JUDGE [Input: {csv_file_path}]")
-    df = pd.read_csv(csv_path)
-    print(f"   -> Loaded {len(df)} responses. sending to GPT-4o-mini...")
+    print(f"\n--- STARTING JUDGE [Method: {method.upper()}] ---")
+    df_raw = pd.read_csv(csv_path)
     
-    # 2. Parallel Judging Function
-    def judge_single_row(row):
-        # Calls your existing function
-        choice = classify_response_with_llm(row['Prompt'], row['Response'])
+    # 2. Load Progress (Resumable Logic)
+    judged_ids = set()
+    if progress_path.exists():
+        df_prog = pd.read_csv(progress_path)
+        judged_ids = set(df_prog['Row_ID'].tolist())
+        print(f"   -> Resuming... Found {len(judged_ids)} already judged rows.")
+    else:
+        print(f"   -> Starting fresh. {len(df_raw)} rows to judge.")
         
+    # Get only the rows we haven't processed yet
+    rows_to_judge = [(idx, row) for idx, row in df_raw.iterrows() if idx not in judged_ids]
+
+    # 3. The Funnel Worker
+    def judge_single_row(args):
+        idx, row, eval_method = args
+        prompt = row['Prompt']
+        resp = str(row['Response'])
+        
+        choice = 'INVALID'
+        if eval_method == 'strict':
+            choice = parse_response(resp)
+        elif eval_method == 'regex':
+            choice = regex_heuristic_judge(prompt, resp)
+            if choice == 'NEEDS_AI': choice = 'INVALID' # Cap the funnel if purely local
+        elif eval_method == 'ai':
+            choice = regex_heuristic_judge(prompt, resp)
+            if choice == 'NEEDS_AI':
+                choice = classify_response_with_llm(prompt, resp)
+                
+        # Map choice to principle
         final_principle = 'INVALID'
         if choice == 'A': final_principle = row['Principle_A']
         elif choice == 'B': final_principle = row['Principle_B']
+        elif choice == 'API_ERROR': final_principle = 'API_ERROR'
         
-        return {
-            'Layer': row['Layer'],
-            'Multiplier': row['Multiplier'],
-            'Result': final_principle
-        }
+        return {'Row_ID': idx, 'Result': final_principle}
 
-    # 3. Execute with ThreadPool (High Speed)
-    # 10 workers is safe for OpenAI rate limits
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = list(tqdm(executor.map(judge_single_row, [row for _, row in df.iterrows()]), total=len(df)))
+    # 4. Parallel Execution & Real-Time Saving
+    if rows_to_judge:
+        file_exists = progress_path.exists()
         
-    # 4. Process Results
-    df_judged = pd.DataFrame(futures)
+        # Open in append mode so we write instantly to disk
+        with open(progress_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['Row_ID', 'Result'])
+            if not file_exists:
+                writer.writeheader()
+                
+            workers = 10 if method == 'ai' else 4 
+            
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                future_to_row = {executor.submit(judge_single_row, (idx, row, method)): idx for idx, row in rows_to_judge}
+                
+                for future in tqdm(as_completed(future_to_row), total=len(rows_to_judge), desc="Judging"):
+                    res = future.result()
+                    writer.writerow(res)
+                    f.flush() # Instantly save to disk to protect against crashes
+                    
+                    # Hard stop on API Error to save quota
+                    if res['Result'] == 'API_ERROR':
+                        print("\n🚨 API Error detected (Limit reached). Halting batch to preserve quota.")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
+    # 5. Process Final Results (Merge raw with progress)
+    df_final_prog = pd.read_csv(progress_path)
     
-    # Calculate Percentages
-    summary = df_judged.groupby(['Layer', 'Multiplier'])['Result'].value_counts(normalize=True).unstack(fill_value=0) * 100
+    if 'API_ERROR' in df_final_prog['Result'].values:
+        error_count = (df_final_prog['Result'] == 'API_ERROR').sum()
+        print(f"\n Run halted. {error_count} rows failed due to OpenAI limits.")
+        print("Wait for your API quota to reset, then run this cell again to pick up exactly where it left off.")
+        return None
+        
+    # Map the results back to the original dataframe
+    df_raw['Result'] = df_raw.index.map(df_final_prog.set_index('Row_ID')['Result'])
+
+    # 6. Calculate Percentages
+    summary = df_raw.groupby(['Layer', 'Multiplier'])['Result'].value_counts(normalize=True).unstack(fill_value=0) * 100
     
-    # Ensure all columns exist (handle case where 0 invalid answers happened)
+    # Ensure standard columns exist (if a run had 0% Invalid, the column might be missing)
     for col in ['Deontological', 'Utilitarian', 'INVALID']:
         if col not in summary.columns: summary[col] = 0.0
         
-    # Rename to match standard format
     summary = summary.rename(columns={'Deontological': 'Deon_Score', 'Utilitarian': 'Util_Score', 'INVALID': 'Invalid_Rate'})
     summary.reset_index(inplace=True)
     
-    # 5. Save Final Results
+    # 7. Save Final Sweep Results
     save_path = EVAL_RESULTS_DIR / output_filename
     summary.to_csv(save_path, index=False)
-    print(f"Judging Complete. Results saved to: {output_filename}")
+    print(f"\nJudging Complete. Final results saved to: {output_filename}")
     
     return summary
