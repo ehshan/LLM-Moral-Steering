@@ -471,15 +471,15 @@ def benchmark_steering_strength(model, tokenizer, vector_file_path, layers_to_te
 # -----------------------------------------------------------------------------
 # Split-process Workflow Functions (GPU Gen -> CPU Judge)
 # -----------------------------------------------------------------------------
-
+# UPDATE LINE 546 max_new_tokens DOWN FROM 60 TO 10
 def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test, multipliers_to_test, sample_size=500, experiment_tag="untagged"):
     """
-    PHASE 1: GPU ONLY.
+    PHASE 1: GPU ONLY 
     Generates model responses and saves them to a CSV. 
-    Does NOT judge them. Fast and cheap on GPU.
+    Does NOT judge them. Fast and highly optimized for VRAM.
     """
     
-    print(f"\STARTING GPU GENERATION [Tag: {experiment_tag}]")
+    print(f"\n--- STARTING GPU GENERATION [Tag: {experiment_tag}] ---")
     
     # Load Vectors
     try:
@@ -500,7 +500,7 @@ def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test,
 
     for layer in layers_to_test:
         if layer not in vector_dict: 
-            print(f"Layer {layer} not found in vector file.")
+            print(f"Layer {layer} not found in vector file. Skipping.")
             continue
             
         vector = vector_dict[layer]
@@ -518,7 +518,7 @@ def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test,
                 text_util = row['chosen']
                 text_deon = row['rejected']
                 
-                # Randomize
+                # Randomize A/B positioning to prevent positional bias
                 if random.random() < 0.5:
                     option_a, option_b = text_util, text_deon
                     target_a, target_b = 'Utilitarian', 'Deontological'
@@ -535,19 +535,21 @@ def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test,
                 if hasattr(inputs, "keys"): inputs = inputs["input_ids"]
                 inputs = inputs.to(model.device)
                 
-                # Attention Mask (Fix for Warning)
+                # Attention Mask (Fix for HuggingFace Warning)
                 attention_mask = torch.ones_like(inputs).to(model.device)
 
-                # Generate
+                # Generate (Optimized for speed and VRAM)
                 with torch.no_grad():
                     outputs = model.generate(
                         inputs, 
                         attention_mask=attention_mask, 
-                        max_new_tokens=60, 
+                        # max_new_tokens=60, 
+                        max_new_tokens=10,  #  Dropped from 60 to 10
                         pad_token_id=tokenizer.eos_token_id, 
                         do_sample=False
                     )
                 
+                # Decode only the newly generated tokens
                 response = tokenizer.decode(outputs[0][inputs.shape[-1]:], skip_special_tokens=True)
                 
                 # Save RAW data
@@ -565,6 +567,9 @@ def batch_generate_responses(model, tokenizer, vector_file_path, layers_to_test,
     # Save to CSV
     df_raw = pd.DataFrame(raw_data)
     filename = f"raw_responses_{experiment_tag}.csv"
+    
+    # Ensure directory exists before saving
+    EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     save_path = EVAL_RESULTS_DIR / filename
     
     df_raw.to_csv(save_path, index=False)
