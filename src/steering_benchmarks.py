@@ -10,22 +10,17 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 from openai import OpenAI
-from google.colab import userdata
+# from google.colab import userdata
 
-# Global Client
-try:
-    # Try to get from Colab Secrets first
-    api_key = userdata.get('OPENAI_API_KEY')
-except:
-    # Fallback/Error handling
-    api_key = os.getenv("OPENAI_API_KEY") 
+# Pull the securely loaded key from our new config bridge
+from src.config import OPENAI_API_KEY, U_VS_D_CONFLICT_PATH, STEERING_PROMPT_DIR, EVAL_RESULTS_DIR
 
-if not api_key:
-    print("WARNING: No OpenAI API Key found. The judge will fail.")
+# Global Client Setup
+if not OPENAI_API_KEY:
+    print("WARNING: No OpenAI API Key found. The AI judge will fail.")
     client = None
 else:
-    client = OpenAI(api_key=api_key)
-
+    client = OpenAI(api_key=OPENAI_API_KEY)
 # Project imports
 from src.config import (
     U_VS_D_CONFLICT_PATH,
@@ -629,6 +624,7 @@ def batch_judge_responses(csv_file_path, method="ai"):
             choice = regex_heuristic_judge(prompt, resp)
             if choice == 'NEEDS_AI':
                 choice = classify_response_with_llm(prompt, resp)
+                time.sleep(0.5)
                 
         # Map choice to principle
         final_principle = 'INVALID'
@@ -648,7 +644,7 @@ def batch_judge_responses(csv_file_path, method="ai"):
             if not file_exists:
                 writer.writeheader()
                 
-            workers = 10 if method == 'ai' else 4 
+            workers = 2 if method == 'ai' else 4 
             
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 future_to_row = {executor.submit(judge_single_row, (idx, row, method)): idx for idx, row in rows_to_judge}
