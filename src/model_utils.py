@@ -7,6 +7,7 @@ def load_model_and_tokenizer(model_id):
     Loads a model and its tokenizer in 4-bit mode.
     """
     print(f"\n[+] Loading model: {model_id}...")
+    print("    (If this is the first time, it is downloading ~16GB of weights in the background. Please wait...)")
     
     load_start_time = time.time()
     
@@ -18,23 +19,24 @@ def load_model_and_tokenizer(model_id):
         bnb_4bit_compute_dtype=torch.bfloat16
     )
 
-    # Load the tokenizer
+    # Load the tokenizer (Added token=True)
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,
-        trust_remote_code=True
+        trust_remote_code=True,
+        token=True 
     )
     
-    # Set padding token if not present
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Load the model
+    # Load the model (Added token=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
         device_map="auto",
-        trust_remote_code=True
+        trust_remote_code=True,
+        token=True
     )
     
     load_end_time = time.time()
