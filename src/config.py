@@ -20,16 +20,47 @@ if IS_COLAB:
     if HF_TOKEN:
         os.environ['HF_TOKEN'] = HF_TOKEN
 else:
-    # LOCAL DESKTOP: Load securely from home directory
+    # LOCAL DESKTOP (Windows Native or WSL): Load securely from home directory
     try:
         from dotenv import load_dotenv
-        # Resolves to C:\Users\username\.env (Windows) or ~/.env (Linux/Mac)
-        env_path = Path.home() / '.env'
+        import subprocess
+        
+        # Handle WSL vs. Windows Pathing Dynamically
+        if "WSL_DISTRO_NAME" in os.environ:
+            # We are inside WSL. Ask the Windows host for the user profile path.
+            try:
+                # Get the Windows home path dynamically (e.g., C:\Users\Name)
+                win_home_raw = subprocess.check_output(
+                    ['cmd.exe', '/c', 'echo %USERPROFILE%'], 
+                    text=True
+                ).strip()
+                
+                # Convert Windows path to WSL path (e.g., /mnt/c/Users/Name)
+                win_home_wsl = subprocess.check_output(
+                    ['wslpath', win_home_raw], 
+                    text=True
+                ).strip()
+                
+                env_path = Path(win_home_wsl) / '.env'
+                
+            except subprocess.CalledProcessError:
+                print("WARNING: Could not resolve WSL to Windows path. Falling back to Linux home.")
+                env_path = Path.home() / '.env'
+        else:
+            # We are on native Windows or standard Linux/Mac
+            env_path = Path.home() / '.env'
+
+        # Load the environment variables from the resolved path
         load_dotenv(dotenv_path=env_path)
+        
     except ImportError:
         print("WARNING: python-dotenv not installed. Run `pip install python-dotenv`.")
-    
-    # load_dotenv automatically populates os.environ, so we can just read them
+
+    # OpenMP Collision Fail-Safe (PyTorch vs NumPy)
+    # Prevents kernel crashes when multiple OpenMP runtimes are loaded in the environment.
+    os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+    # load_dotenv automatically populates os.environ, so we can simply read them
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     HF_TOKEN = os.getenv("HF_TOKEN")
 
