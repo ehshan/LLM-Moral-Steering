@@ -1,30 +1,68 @@
-# LLM-Moral-Steering
+# Representation Engineering of Moral Frameworks in Large Language Models via Contrastive Activation Addition
 
-> **Probing and steering LLM moral alignment using activation engineering on ethical dilemmas from the Moral Machine dataset.**
+## Abstract
+The alignment of Large Language Models (LLMs) for complex, normative ethical frameworks, such as the trade-offs between utilitarian (outcome-focused) and deontological (rule-focused) reasoning, presents an ongoing challenge. Standard Reinforcement Learning from Human Feedback (RLHF) methods typically optimise for a mean human preference, which can result in opaque and rigid model behaviour. 
 
-## Introduction
-LLM alignment for complex, normative ethical questions (like utilitarian vs. deontological trade-offs) is a significant challenge. Traditional alignment methods (e.g., RLHF) often train for an "average" preference and can be opaque.
+This project applies Contrastive Activation Addition (CAA), a subset of Representation Engineering, to map and manipulate the internal representation of moral reasoning within Llama-3-8B-Instruct. By intervening during inference, we demonstrate the capacity to controllably shift the model's ethical framework in real-time without modifying the underlying weights. Our findings map the internal topography of the model, identifying specific layers that allow for an approximate 38% shift in moral decision-making behaviour before the onset of semantic collapse or safety-induced refusal.
 
-This project explores a more precise and interpretable method: **activation steering**. The goal is to controllably "steer" an LLM's moral reasoning at inference time, without needing to retrain the model.
+## Methodology: Data and Vector Generation
 
-## Methodology
-The methodology is broken down into three stages: data processing, vector generation, and experimental steering.
+### Novel Dataset Curation
+A contribution of this work is the development of a structured, templated dataset of narrative ethical dilemmas. While the base scenarios are derived from the [MIT Moral Machine dataset](https://www.nature.com/articles/s41586-018-0637-6), we processed this raw data into standardised A/B multiple-choice prompts. This uniform formatting ensures that the model is evaluated purely on its moral reasoning rather than its ability to parse unstructured text.
 
-## DONE
+### Contrastive Pair Processing
+To isolate the specific neural representations of ethical frameworks, we generated a sample size of 500 contrastive prompt pairs. Each pair pits a purely utilitarian outcome against a purely deontological outcome. We executed forward passes on these opposing templates, extracting the activation differences in the residual stream at every layer. Averaging these differences over the 500 pairs filters out syntactic noise, yielding a robust, localised steering vector for each layer.
 
-### 1. The Data (Moral Machine)
-* **Source**: We use the [Moral Machine dataset](https://www.nature.com/articles/s41586-018-0637-6), a collection of 40 million human judgments on "trolley problem" style ethical dilemmas.
-* **Relevance**: This dataset is ideal because it provides a massive corpus of scenarios that directly pit a utilitarian choice against a deontological one.
-* **Processing**: Raw CSV data is processed into clean, text-based scenariosfor the LLM.
+## Evaluation Architecture: Multi-Tier Evaluation Pipeline
+A known limitation in current Representation Engineering literature is the reliance on next-token probabilities (logits) or strict regex parsers to evaluate steering success. These methods often overstate control bandwidth by failing to account for semantic collapse instances where the model outputs the correct multiple-choice letter but generates incoherent text or triggers a safety refusal.
 
-## IN PROGRESS
+To accurately measure coherent generative bandwidth, we implemented a Multi-Tier Evaluation Pipeline:
+1. **Tier 1 (Regex Parser):** Checks for perfectly formatted, unambiguous responses.
+2. **Tier 2 (Heuristic Fallback):** Handles minor formatting deviations.
+3. **Tier 3 (AI Evaluator):** Delegates ambiguous or conversational text to an LLM evaluator (GPT-4o-mini) to classify the semantic reasoning as Utilitarian, Deontological, or Invalid.
 
-### 2. Generating the "Moral Vector" 
-* **Concept**: We apply activation steering, which involves adding a "steering vector" to a model's internal activations to influence its output.
-* **Generation**: We find this vector by running the model on pairs of scenarios with opposing moral frames (e.g., one strongly utilitarian, one strongly deontological). We then extract the differential activations from a specific layer and average them to create a single, robust "utilitarian-vs-deontological" steering vector
+**The 15% Invalid Threshold:** To ensure empirical rigour, any layer and multiplier combination that produces an invalid rate (safety refusals or gibberish) greater than 15% is masked out. This ensures reported control bandwidths represent safe, usable generative corridors.
 
-## TODO
+## Core Findings: Layer Profile
+Through a comprehensive 32-layer sweep of Llama-3-8B-Instruct, we mapped the topographical distribution of moral reasoning, categorising the architecture into distinct functional regions:
 
-### 3. Experiments
-* **Hypothesis**: Apply the vector with a positive multiplier will make the LLM's responses more utilitarian, while a negative multiplier will make them more deontological.
-* **Testing**: The vector at various strengths (multipliers) while the LLM processes new, ambiguous moral dilemmas and measure the change in its stated preference.
+* **Volatile Early Layers (Layers 0–3):** These layers exhibit high sensitivity to intervention. Applying steering vectors here results in immediate structural and syntactic degradation.
+* **RLHF-Sensitive Intermediate Layers (Layers 4–15):** These layers demonstrate highly asymmetric behaviour. Negative multipliers (pushing towards utilitarianism) suppress safety constraints, while positive multipliers (pushing towards deontology) artificially amplify RLHF safety circuits, resulting in a high rate of refusals.
+* **Stable Conceptual Layers (Layers 16–22):** Interventions at this depth yield a highly stable control bandwidth of up to 38%. The model can be steered using extreme multipliers without triggering refusal walls or semantic collapse, indicating that abstract conceptual routing is concentrated in this region.
+
+### Visualisation Topography
+*Heatmaps and spatial analyses of the layer profile are stored in `./data/evaluation_results/`.*
+
+![Global Steering Heatmap](./data/evaluation_results/Viz_Global_Heatmap_Master_Sweep_ai_20260226.png)
+![Refusal Wall Heatmap](./data/evaluation_results/Viz_Global_Refusal_Master_Sweep_ai_20260226.png)
+![Layer Metrics Atlas](./data/evaluation_results/Layer_Metrics_Atlas_Master_Sweep_ai_20260226.png)
+
+## Methodology Validation
+To demonstrate the necessity of the Multi-Tier Evaluation Pipeline, we compared the invalid rates recorded by a strict regex parser against those recorded by the AI evaluator. The data shows that strict parsing artificially inflates the refusal rate by discarding valid moral reasoning affected by minor formatting degradation caused by the steering vector.
+
+*(Graph pending generation)*
+
+## Future Research Roadmap
+* **Multi-Layer Vector Composition:** We plan to test composite steering by applying vectors to different layers simultaneously. For example, combining an intervention at an RLHF-Sensitive Intermediate Layer with an intervention at a Stable Conceptual Layer to assess if the "Ethical Shift" can be decoupled from the "Refusal Trigger."
+* **Advanced Probing:** We will project the moral vector orthogonally to an independently calculated "Refusal Vector" to further isolate pure ethical steering. Additionally, we will evaluate the steered model using the Oxford Utilitarian Scale.
+* **Scale and Architecture:** Future experiments will test whether a moral vector trained on Llama-3-8B generalises to the larger Llama-3-70B model.
+
+## Hardware and Reproducibility Statement
+To ensure reproducibility, this project was executed across two primary hardware environments. Vector generation and model inference (forward passes) were performed on cloud-based NVIDIA A100 GPUs. The Multi-Tier Evaluation Pipeline, data aggregation, and local inference testing were executed on an NVIDIA RTX 5080 leveraging 4-bit quantisation via `bitsandbytes` within a WSL environment.
+
+## Repository Structure
+```text
+C:\Workspace\PhD\LLM-Moral-Steering\
+├── data\
+│   ├── evaluation_results\             # Aggregated CSVs, metrics atlases, and visualisations
+│   ├── original\                       # Raw source data
+│   └── processed\
+│       ├── contrastive_datasets\       # Templated A/B paired datasets
+│       └── steering_prompts\           # JSON files and generated .pt steering vectors
+├── evaluation\                         # Standalone evaluation scripts and utilities
+├── notebooks\                          # Jupyter notebooks
+├── src\                                # Core Python modules
+└── vignettes\                          # Sample outputs and qualitative examples
+```
+
+## References
