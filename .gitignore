@@ -15,3 +15,10 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# config
+.stfolder/
+.stignore
+
+# local environment testing 
+test_env.py
