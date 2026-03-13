@@ -52,7 +52,7 @@ To ensure reproducibility, this project was executed across two primary hardware
 
 ## Repository Structure
 ```text
-C:\Workspace\PhD\LLM-Moral-Steering\
+LLM-Moral-Steering\
 ├── data\
 │   ├── evaluation_results\             # Aggregated CSVs, metrics atlases, and visualisations
 │   ├── original\                       # Raw source data
