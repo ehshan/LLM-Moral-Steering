@@ -11,7 +11,6 @@ import seaborn as sns
 
 from pathlib import Path
 from typing import List, Optional
-from typing import Optional
 
 
 def aggregate_sweep_results(
@@ -22,7 +21,8 @@ def aggregate_sweep_results(
 ) -> Optional[pd.DataFrame]:
     """
     Merges raw generation logs with AI Judge progress files to calculate final 
-    percentage scores (Deontological, Utilitarian, Invalid) per layer and multiplier.
+    percentage scores (Deontological, Utilitarian, Invalid) per entity and multiplier.
+    Dynamically supports both single-layer baselines and multi-layer profiles.
 
     Args:
         raw_files (List[str]): List of filenames for the raw generation chunks.
@@ -56,14 +56,22 @@ def aggregate_sweep_results(
             # Map the AI judgments back to the original rows via index/Row_ID
             df_raw['Result'] = df_raw.index.map(df_prog.set_index('Row_ID')['Result'])
             
-            # Calculate the percentages: group by Layer/Multiplier and normalize
+            # Dynamically determine the grouping target
+            if 'Profile_Name' in df_raw.columns and 'Sweep_Multiplier' in df_raw.columns:
+                group_cols = ['Profile_Name', 'Sweep_Multiplier']
+            elif 'Layer' in df_raw.columns and 'Multiplier' in df_raw.columns:
+                group_cols = ['Layer', 'Multiplier']
+            else:
+                raise KeyError(f"Unrecognised column structure in {raw_name}.")
+
+            # Calculate the percentages: group by target entity and normalise
             summary = (
-                df_raw.groupby(['Layer', 'Multiplier'])['Result']
+                df_raw.groupby(group_cols)['Result']
                 .value_counts(normalize=True)
                 .unstack(fill_value=0) * 100
             )
             
-            # Ensure standard categorical columns exist even if no errors occurred in this chunk
+            # Ensure standard categorical columns exist
             for col in ['Deontological', 'Utilitarian', 'INVALID', 'API_ERROR']:
                 if col not in summary.columns: 
                     summary[col] = 0.0
@@ -75,7 +83,7 @@ def aggregate_sweep_results(
                 'INVALID': 'Invalid_Rate'
             })
             
-            # Fold API_ERRORs into the Invalid_Rate to ensure clean masking on heatmaps
+            # Fold API_ERRORs into the Invalid_Rate for clean heatmap masking
             if 'API_ERROR' in summary.columns:
                 summary['Invalid_Rate'] += summary['API_ERROR']
                 summary = summary.drop(columns=['API_ERROR'])
@@ -88,12 +96,19 @@ def aggregate_sweep_results(
     # Final Merge & Save
     if all_summaries:
         master_df = pd.concat(all_summaries, ignore_index=True)
-        expected_rows = master_df['Layer'].nunique() * master_df['Multiplier'].nunique()
         
+        # Dynamically calculate expected rows and set output prefix
+        if 'Profile_Name' in master_df.columns:
+            expected_rows = master_df['Profile_Name'].nunique() * master_df['Sweep_Multiplier'].nunique()
+            prefix = "composite"
+        else:
+            expected_rows = master_df['Layer'].nunique() * master_df['Multiplier'].nunique()
+            prefix = "0-31"
+            
         print(f"\nCreated Master DataFrame with {len(master_df)} rows. (Expected: {expected_rows})")
         
         # Save the aggregated master file
-        master_filename = f"strength_sweep_results_0-31_AGGREGATED_{method}.csv"
+        master_filename = f"strength_sweep_results_{prefix}_AGGREGATED_{method}.csv"
         master_filepath = output_dir / master_filename
         master_df.to_csv(master_filepath, index=False)
         print(f"Saved to: {master_filepath}")
@@ -114,6 +129,7 @@ def generate_metrics_atlas(
     Scans the aggregated dataframe to calculate maximum safe semantic shifts,
     total control bandwidth, and the precise boundaries of refusal/collapse walls.
     Exports the results as a CSV and a formatted PNG table.
+    Dynamically supports both single-layer baselines and multi-layer profiles.
 
     Args:
         df (pd.DataFrame): The aggregated master dataframe.
@@ -125,7 +141,7 @@ def generate_metrics_atlas(
     Returns:
         pd.DataFrame or None: The metrics atlas dataframe, or None if it fails.
     """
-    print(f"--- Generating Layer Metrics Atlas ({tag}) ---")
+    print(f"--- Generating Metrics Atlas ({tag}) ---")
     
     # Ensure standard column naming conventions before processing
     rename_map = {
@@ -135,31 +151,48 @@ def generate_metrics_atlas(
     }
     df = df.rename(columns=rename_map)
     
+    # Dynamic Column Sniffing
+    if 'Profile_Name' in df.columns and 'Sweep_Multiplier' in df.columns:
+        entity_col = 'Profile_Name'
+        x_col = 'Sweep_Multiplier'
+        entity_label = 'Profile'
+        file_prefix = 'Profile_Metrics_Atlas'
+        title_prefix = 'Intervention Profile Atlas'
+    elif 'Layer' in df.columns and 'Multiplier' in df.columns:
+        entity_col = 'Layer'
+        x_col = 'Multiplier'
+        entity_label = 'Layer'
+        file_prefix = 'Layer_Metrics_Atlas'
+        title_prefix = 'Layer Control Atlas'
+    else:
+        print("Error: Missing required columns for atlas generation. Check dataframe.")
+        return None
+
     # Validate required columns exist
-    required_cols = ['Layer', 'Multiplier', 'Deon_Score', 'Invalid_Rate']
+    required_cols = [entity_col, x_col, 'Deon_Score', 'Invalid_Rate']
     if not all(col in df.columns for col in required_cols):
         print("Error: Missing required columns for atlas generation. Check dataframe.")
         return None
 
     metrics_data = []
     
-    # Mathematical extraction per layer
-    for layer in sorted(df['Layer'].unique()):
-        layer_df = df[df['Layer'] == layer]
+    # Mathematical extraction per entity
+    for entity in sorted(df[entity_col].unique()):
+        entity_df = df[df[entity_col] == entity]
         
         # Isolate the baseline (0.0 multiplier)
-        baseline_row = layer_df[layer_df['Multiplier'] == 0.0]
+        baseline_row = entity_df[entity_df[x_col] == 0.0]
         if baseline_row.empty:
             continue
         baseline_deon = baseline_row['Deon_Score'].values[0]
         
         # Filter strictly for valid responses below the collapse threshold
-        valid_df = layer_df[layer_df['Invalid_Rate'] <= invalid_threshold]
+        valid_df = entity_df[entity_df['Invalid_Rate'] <= invalid_threshold]
         
-        # Handle entirely broken layers
+        # Handle entirely broken entities
         if valid_df.empty:
             metrics_data.append({
-                'Layer': int(layer), 
+                entity_label: entity if isinstance(entity, str) else int(entity), 
                 'Baseline (Deon)': f"{baseline_deon:.1f}%",
                 'Max Deon Shift': "N/A", 
                 'Max Util Shift': "N/A", 
@@ -177,15 +210,15 @@ def generate_metrics_atlas(
         bandwidth = max_deon - min_deon
         
         # Locate the architectural breakdown boundaries (Walls)
-        invalid_df = layer_df[layer_df['Invalid_Rate'] > invalid_threshold]
-        pos_invalids = invalid_df[invalid_df['Multiplier'] > 0]['Multiplier']
-        neg_invalids = invalid_df[invalid_df['Multiplier'] < 0]['Multiplier']
+        invalid_df = entity_df[entity_df['Invalid_Rate'] > invalid_threshold]
+        pos_invalids = invalid_df[invalid_df[x_col] > 0][x_col]
+        neg_invalids = invalid_df[invalid_df[x_col] < 0][x_col]
         
         pos_wall = f"+{pos_invalids.min()}" if not pos_invalids.empty else "None"
         neg_wall = f"{neg_invalids.max()}" if not neg_invalids.empty else "None"
         
         metrics_data.append({
-            'Layer': int(layer),
+            entity_label: entity if isinstance(entity, str) else int(entity),
             'Baseline (Deon)': f"{baseline_deon:.1f}%",
             'Max Deon Shift': f"+{peak_shift_deon:.1f}%" if peak_shift_deon > 0 else f"{peak_shift_deon:.1f}%",
             'Max Util Shift': f"{peak_shift_util:.1f}%",
@@ -200,12 +233,12 @@ def generate_metrics_atlas(
     print(metrics_df.to_string(index=False))
     
     # Deliverable 1: Save as raw CSV data
-    csv_out_path = output_dir / f"Layer_Metrics_Atlas_{tag}.csv"
+    csv_out_path = output_dir / f"{file_prefix}_{tag}.csv"
     metrics_df.to_csv(csv_out_path, index=False)
     print(f"\nCSV saved to: {csv_out_path}")
     
     # Deliverable 2: Render as a formatted PNG table for documentation
-    png_out_path = output_dir / f"Layer_Metrics_Atlas_{tag}.png"
+    png_out_path = output_dir / f"{file_prefix}_{tag}.png"
     
     # Dynamically size the figure based on the number of rows
     fig, ax = plt.subplots(figsize=(10, len(metrics_df) * 0.3 + 1.5))
@@ -223,14 +256,14 @@ def generate_metrics_atlas(
     table.scale(1.2, 1.5)
     
     # Apply styling and alternating row colours for readability
-    for (row, col), cell in table.get_celld().items():
+    for (row, col), table_cell in table.get_celld().items():
         if row == 0:
-            cell.set_text_props(weight='bold', color='white')
-            cell.set_facecolor('#4C72B0')
+            table_cell.set_text_props(weight='bold', color='white')
+            table_cell.set_facecolor('#4C72B0')
         elif row % 2 == 0:
-            cell.set_facecolor('#F3F6F9')
+            table_cell.set_facecolor('#F3F6F9')
             
-    plt.title(f"Layer Control Atlas: Steering Metrics ({tag})", fontsize=16, fontweight='bold', pad=20)
+    plt.title(f"{title_prefix}: Steering Metrics ({tag})", fontsize=16, fontweight='bold', pad=20)
     plt.tight_layout()
     plt.savefig(png_out_path, dpi=300, bbox_inches='tight')
     plt.close()
