@@ -27,8 +27,8 @@ To accurately measure coherent generative bandwidth, we implemented a Multi-Tier
 Through a 32-layer sweep of Llama-3-8B-Instruct, we mapped the topographical distribution of moral reasoning, categorising three distinct regions:
 
 * **Volatile Early Layers (Layers 0–3):** These layers exhibit high sensitivity to intervention. Applying steering vectors here results in immediate structural and syntactic degradation.
-* **RLHF-Sensitive Intermediate Layers (Layers 4–15):** These layers demonstrate highly asymmetric behaviour. Negative multipliers (pushing towards utilitarianism) suppress safety constraints, while positive multipliers (pushing towards deontology) artificially amplify RLHF safety circuits, resulting in a high rate of refusals.
-* **Stable Conceptual Layers (Layers 16–22):** Interventions at this depth yield a highly stable control bandwidth of up to 38%. The model can be steered using extreme multipliers without triggering refusal walls or semantic collapse, indicating that abstract conceptual routing is concentrated in this region.
+* **RLHF-Sensitive Intermediate Layers (Layers 4–15):** These layers demonstrate highly asymmetric behaviour. Negative multipliers (pushing towards utilitarianism/active harm) trigger RLHF safety circuits, resulting in a high rate of refusals. Positive multipliers (pushing towards deontology/inaction) are treated as safe and do not trigger refusals.
+* **Stable Conceptual Layers (Layers 16–22):** Interventions at this depth yield a highly stable control bandwidth of up to 38%. The model can be steered using extreme multipliers without triggering refusal walls or semantic collapse, indicating that abstract conceptual routing is concentrated in this region. 
 
 ### Visualisation Topography
 *Heatmaps and spatial analyses of the layer profile are stored in `./data/evaluation_results/`.*
@@ -37,14 +37,20 @@ Through a 32-layer sweep of Llama-3-8B-Instruct, we mapped the topographical dis
 ![Refusal Wall Heatmap](./data/evaluation_results/Viz_Global_Refusal_Master_Sweep_ai_20260226.png)
 ![Layer Metrics Atlas](./data/evaluation_results/Layer_Metrics_Atlas_Master_Sweep_ai_20260226.png)
 
+## Composite Steering Interventions
+Initial testing investigated whether the "Ethical Shift" could be decoupled from the "Refusal Trigger" by applying a localised, high-magnitude ablation of the safety circuit at an early layer (Layer 6, -1.5 multiplier) while simultaneously sweeping the moral vector at a stable conceptual layer (Layer 17). 
+
+* **Conceptual Excision:** The intervention mathematically bypassed the safety monitor, as the model survived a -2.5 utilitarian multiplier without triggering a standard refusal. However, the generative output failed to shift past the baseline (44.6% Deontological). The heavy, localised clamp excised the semantic capacity required to process utilitarian logic, creating a conceptual vacuum.
+* **Geometric Tension and Structural Snapping:** Applying a heavy directional clamp at Layer 6 warped the residual stream. Subsequent attempts to steer the model in the opposing direction (Deontology, +0.5 multiplier) at Layer 17 stretched the activations beyond the boundaries of the standard linguistic manifold, causing immediate syntactic shattering.
+
 ## Methodology Validation
 To demonstrate the necessity of the Multi-Tier Evaluation Pipeline, we compared the invalid rates recorded by a strict regex parser against those recorded by the AI evaluator. The data shows that strict parsing inflates the refusal rate by discarding valid moral reasoning affected by minor formatting issues caused by the steering vector.
 
 *(Graph pending generation)*
 
 ## Future Research Roadmap
-* **Multi-Layer Vector Composition:** We plan to test composite steering by applying vectors to different layers simultaneously. For example, combining an intervention at an RLHF-Sensitive Intermediate Layer with an intervention at a Stable Conceptual Layer to assess if the "Ethical Shift" can be decoupled from the "Refusal Trigger."
-* **Advanced Probing:** We will project the moral vector orthogonally to an independently calculated "Refusal Vector" to further isolate pure ethical steering. Additionally, we will evaluate the steered model using the Oxford Utilitarian Scale.
+* **Naive Continuous Scrubbing:** We will test whether distributing the refusal suppression evenly across all 32 layers, rather than applying a single heavy clamp, resolves geometric tension and preserves conceptual logic. (Reference: Arditi et al., 2024).
+* **Orthogonalized Concept Steering:** We will project the moral vector orthogonally to an independently calculated "Refusal Vector" using closed-form geometric projection. This ensures the moral vector operates at a 90-degree angle to the refusal vector, eliminating feature entanglement entirely.  (Reference: Belrose et al., 2023).
 * **Scale and Architecture:** Future experiments will test whether a moral vector trained on Llama-3-8B generalises to the larger Llama-3-70B model.
 
 ## Hardware and Reproducibility Statement
@@ -54,15 +60,14 @@ To ensure reproducibility, this project was executed across two primary hardware
 ```text
 LLM-Moral-Steering\
 ├── data\
-│   ├── evaluation_results\             # Aggregated CSVs, metrics atlases, and visualisations
-│   ├── original\                       # Raw source data
-│   └── processed\
-│       ├── contrastive_datasets\       # Templated A/B paired datasets
-│       └── steering_prompts\           # JSON files and generated .pt steering vectors
-├── evaluation\                         # Standalone evaluation scripts and utilities
-├── notebooks\                          # Jupyter notebooks
-├── src\                                # Core Python modules
-└── vignettes\                          # Sample outputs and qualitative examples
-```
+│   ├── evaluation_results\             # Aggregated CSVs, metrics atlases, and visualisations
+│   ├── original\                       # Raw source data
+│   └── processed\
+│       ├── contrastive_datasets\       # Templated A/B paired datasets
+│       └── steering_prompts\           # JSON files and generated .pt steering vectors
+├── evaluation\                         # Standalone evaluation scripts and utilities
+├── notebooks\                          # Jupyter notebooks
+├── src\                                # Core Python modules
+└── vignettes\                          # Sample outputs and qualitative examples
 
 ## References
